@@ -1,11 +1,34 @@
+
 import { useState } from "react";
 import "./App.css";
 
 const API_URL = "http://127.0.0.1:8000/analyze-url";
+const MAX_HISTORY = 10;
+
+function formatFeatureName(name) {
+  return name.replaceAll("_", " ");
+}
+
+function formatLabel(value) {
+  return String(value ?? "Unavailable")
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function getPrediction(result) {
+  const prediction = result?.ml_prediction;
+
+  if (prediction?.status && prediction.status !== "available") {
+    return "unavailable";
+  }
+
+  return prediction?.prediction ?? "unavailable";
+}
 
 function App() {
   const [url, setUrl] = useState("");
   const [result, setResult] = useState(null);
+  const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -15,7 +38,36 @@ function App() {
     const targetUrl = url.trim();
 
     if (!targetUrl) {
-      setError("Please enter a URL to scan.");
+      setError("Please enter a URL.");
+      setResult(null);
+      return;
+    }
+
+    if (/\s/.test(targetUrl)) {
+      setError("The URL cannot contain spaces. Check the address and try again.");
+      setResult(null);
+      return;
+    }
+
+    let parsedUrl;
+
+    try {
+      parsedUrl = new URL(
+        /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(targetUrl)
+          ? targetUrl
+          : `https://${targetUrl}`
+      );
+    } catch {
+      setError("This doesn't look like a valid URL. Enter a domain such as example.com.");
+      setResult(null);
+      return;
+    }
+
+    if (
+      !["http:", "https:"].includes(parsedUrl.protocol) ||
+      !parsedUrl.hostname.includes(".")
+    ) {
+      setError("Enter a valid HTTP or HTTPS website URL.");
       setResult(null);
       return;
     }
@@ -27,9 +79,7 @@ function App() {
     try {
       const response = await fetch(API_URL, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: targetUrl }),
       });
 
@@ -41,17 +91,30 @@ function App() {
             ? data.detail
             : data.detail
               ? JSON.stringify(data.detail)
-              : `Request failed with status ${response.status}`;
+              : `Request failed (${response.status})`;
 
         throw new Error(detail);
       }
 
       setResult(data);
+
+      const entry = {
+        id: `${Date.now()}-${Math.random()}`,
+        url: data.url ?? targetUrl,
+        result: data,
+        scannedAt: new Date().toLocaleTimeString(),
+      };
+
+      setHistory((previous) =>
+        [entry, ...previous].slice(0, MAX_HISTORY)
+      );
     } catch (err) {
       setError(
-        err instanceof Error
-          ? err.message
-          : "Could not connect to the PhishSight API."
+        err instanceof TypeError
+          ? "Could not connect to the API. Make sure your FastAPI server is running at 127.0.0.1:8000."
+          : err instanceof Error
+            ? err.message
+            : "An unexpected error occurred."
       );
     } finally {
       setLoading(false);
@@ -60,14 +123,24 @@ function App() {
 
   function handleUrlChange(event) {
     setUrl(event.target.value);
-    setResult(null);
     setError("");
+  }
+
+  function openHistoryItem(item) {
+    setUrl(item.url);
+    setResult(item.result);
+    setError("");
+  }
+
+  function clearHistory() {
+    setHistory([]);
   }
 
   const prediction = result?.ml_prediction;
   const assessment = result?.assessment;
   const features = result?.features ?? {};
   const indicators = assessment?.indicators ?? [];
+  const predictedLabel = getPrediction(result);
 
   return (
     <div className="app-shell">
@@ -82,15 +155,20 @@ function App() {
 
         <div className="nav-label">WORKSPACE</div>
 
-        <div className="nav-item active">
+        <a className="nav-item active" href="#scanner">
           <span className="nav-symbol">⌕</span>
-          <span>URL Scanner</span>
-        </div>
+          URL Scanner
+        </a>
 
-        <div className="nav-item">
+        <a className="nav-item" href="#analysis">
           <span className="nav-symbol">◈</span>
-          <span>Threat Analysis</span>
-        </div>
+          Threat Analysis
+        </a>
+
+        <a className="nav-item" href="#history">
+          <span className="nav-symbol">◷</span>
+          Scan History
+        </a>
 
         <div className="sidebar-bottom">
           <span className="status-dot" />
@@ -105,14 +183,13 @@ function App() {
             <span className="breadcrumb">WORKSPACE /</span>
             <span className="breadcrumb-current"> URL SCANNER</span>
           </div>
-
           <div className="system-status">
             <span className="status-dot" />
             System initialized
           </div>
         </header>
 
-        <section className="welcome">
+        <section className="welcome" id="scanner">
           <div className="eyebrow">
             <span className="eyebrow-line" />
             EXPLAINABLE SECURITY
@@ -131,12 +208,10 @@ function App() {
         <section className="scanner-card">
           <div className="card-heading">
             <div className="heading-icon">↗</div>
-
             <div>
               <h3>URL intelligence scanner</h3>
-              <p>Enter a URL to begin your security analysis.</p>
+              <p>Enter a website address to begin your analysis.</p>
             </div>
-
             <span className="version-tag">ML ENGINE</span>
           </div>
 
@@ -145,7 +220,6 @@ function App() {
 
             <div className="url-input-wrap">
               <span className="input-icon">↗</span>
-
               <input
                 id="url-input"
                 type="text"
@@ -156,11 +230,12 @@ function App() {
                 spellCheck="false"
                 aria-label="URL to scan"
                 disabled={loading}
+                maxLength={2048}
               />
 
               <button type="submit" disabled={loading || !url.trim()}>
                 {loading ? "Scanning..." : "Scan URL"}
-                <span>{loading ? "..." : "→"}</span>
+                <span>{loading ? "…" : "→"}</span>
               </button>
             </div>
           </form>
@@ -217,13 +292,13 @@ function App() {
             <h3>Scan could not be completed</h3>
             <p>{error}</p>
             <small>
-              Check that the FastAPI server is running at 127.0.0.1:8000.
+              Check the URL and confirm that the FastAPI server is running.
             </small>
           </section>
         )}
 
         {result && (
-          <section className="results-section" aria-live="polite">
+          <section className="results-section" id="analysis" aria-live="polite">
             <div className="section-heading">
               <h3>Scan results</h3>
               <span>ANALYSIS COMPLETE</span>
@@ -232,25 +307,15 @@ function App() {
             <div className="result-card">
               <div className="result-topline">
                 <span className="result-label">MACHINE LEARNING</span>
-                <span
-                  className={`prediction-badge ${
-                    prediction?.prediction === "phishing"
-                      ? "prediction-danger"
-                      : prediction?.prediction === "legitimate"
-                        ? "prediction-safe"
-                        : "prediction-unknown"
-                  }`}
-                >
-                  {prediction?.status === "available"
-                    ? prediction.prediction
-                    : "Unavailable"}
+                <span className={`prediction-badge prediction-${predictedLabel}`}>
+                  {formatLabel(predictedLabel)}
                 </span>
               </div>
 
               <h3>
-                {prediction?.prediction === "phishing"
+                {predictedLabel === "phishing"
                   ? "Potential phishing detected"
-                  : prediction?.prediction === "legitimate"
+                  : predictedLabel === "legitimate"
                     ? "Model classified this URL as legitimate"
                     : "ML prediction unavailable"}
               </h3>
@@ -261,18 +326,12 @@ function App() {
                 <div className="result-details">
                   <div>
                     <span>MODEL</span>
-                    <strong>
-                      {prediction.model ?? "Character ML"}
-                    </strong>
+                    <strong>{prediction.model ?? "Character ML"}</strong>
                   </div>
-
                   <div>
                     <span>PREDICTED LABEL</span>
-                    <strong>
-                      {prediction.predicted_label ?? "Unavailable"}
-                    </strong>
+                    <strong>{prediction.predicted_label ?? "Unavailable"}</strong>
                   </div>
-
                   <div>
                     <span>DECISION SCORE</span>
                     <strong>
@@ -284,18 +343,17 @@ function App() {
                 </div>
               )}
 
-              {prediction?.message && (
-                <p className="score-note">{prediction.message}</p>
-              )}
-
               {prediction?.score_note && (
                 <p className="score-note">{prediction.score_note}</p>
               )}
 
+              {prediction?.message && (
+                <p className="score-note">{prediction.message}</p>
+              )}
+
               <div className="result-disclaimer">
-                A model prediction is an indicator, not proof that a URL is
-                safe or malicious. A positive decision score favors the
-                legitimate class in this model; it is not a probability.
+                This is a model classification, not proof that the URL is safe
+                or malicious. The decision score is not a probability.
               </div>
             </div>
 
@@ -303,12 +361,11 @@ function App() {
               <div className="result-topline">
                 <span className="result-label">RULE-BASED ANALYSIS</span>
                 <span className="category-badge">
-                  {assessment?.category ?? "Unavailable"}
+                  {formatLabel(assessment?.category)}
                 </span>
               </div>
 
               <h3>Heuristic assessment</h3>
-
               <p>
                 {assessment?.summary ??
                   "No heuristic summary was returned by the API."}
@@ -317,23 +374,15 @@ function App() {
               <div className="result-details">
                 <div>
                   <span>RULES VERSION</span>
-                  <strong>
-                    {assessment?.rules_version ?? "Unavailable"}
-                  </strong>
+                  <strong>{assessment?.rules_version ?? "Unavailable"}</strong>
                 </div>
-
                 <div>
                   <span>INDICATORS FOUND</span>
-                  <strong>
-                    {assessment?.indicator_count ?? indicators.length}
-                  </strong>
+                  <strong>{assessment?.indicator_count ?? indicators.length}</strong>
                 </div>
-
                 <div>
                   <span>ASSESSMENT METHOD</span>
-                  <strong>
-                    {assessment?.method ?? "Unavailable"}
-                  </strong>
+                  <strong>{assessment?.method ?? "Unavailable"}</strong>
                 </div>
               </div>
 
@@ -343,16 +392,18 @@ function App() {
                 <ul className="indicator-list">
                   {indicators.map((indicator, index) => (
                     <li key={indicator.code ?? index}>
-                      <strong>
-                        {indicator.message ??
-                          indicator.description ??
-                          indicator.code ??
-                          `Indicator ${index + 1}`}
-                      </strong>
-
-                      {indicator.code && indicator.message && (
-                        <small>{indicator.code}</small>
-                      )}
+                      <span className="indicator-mark">!</span>
+                      <div>
+                        <strong>
+                          {indicator.message ??
+                            indicator.description ??
+                            indicator.code ??
+                            `Indicator ${index + 1}`}
+                        </strong>
+                        {indicator.code && (
+                          <small>{formatLabel(indicator.code)}</small>
+                        )}
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -372,14 +423,14 @@ function App() {
               <span className="result-label">URL STRUCTURE</span>
               <h3>Extracted features</h3>
               <p>
-                These are the URL characteristics extracted by your backend
-                for its rule-based analysis.
+                These characteristics were extracted by the backend for its
+                rule-based analysis.
               </p>
 
               <div className="feature-list">
                 {Object.entries(features).map(([name, value]) => (
                   <div className="feature-row" key={name}>
-                    <span>{name.replaceAll("_", " ")}</span>
+                    <span>{formatFeatureName(name)}</span>
                     <strong>{String(value)}</strong>
                   </div>
                 ))}
@@ -387,6 +438,71 @@ function App() {
             </div>
           </section>
         )}
+
+        <section className="history-section" id="history">
+          <div className="section-heading">
+            <div>
+              <h3>Recent scans</h3>
+              <p className="history-subtitle">
+                Reopen the results of your recent analyses.
+              </p>
+            </div>
+
+            <div className="history-actions">
+              <span>{history.length} / {MAX_HISTORY}</span>
+              {history.length > 0 && (
+                <button
+                  className="text-button"
+                  type="button"
+                  onClick={clearHistory}
+                >
+                  Clear history
+                </button>
+              )}
+            </div>
+          </div>
+
+          {history.length === 0 ? (
+            <div className="result-card history-empty">
+              <span className="empty-history-icon">◷</span>
+              <h3>No scans yet</h3>
+              <p>Your successful URL scans will appear here.</p>
+            </div>
+          ) : (
+            <div className="history-list">
+              {history.map((item) => {
+                const label = getPrediction(item.result);
+
+                return (
+                  <button
+                    className="history-item"
+                    key={item.id}
+                    type="button"
+                    onClick={() => openHistoryItem(item)}
+                  >
+                    <div className="history-item-main">
+                      <strong className="history-url">{item.url}</strong>
+                      <span className="history-time">{item.scannedAt}</span>
+                    </div>
+
+                    <div className="history-item-meta">
+                      <span className={`prediction-badge prediction-${label}`}>
+                        {formatLabel(label)}
+                      </span>
+                      <span className="history-category">
+                        {formatLabel(item.result.assessment?.category)}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          <p className="history-note">
+            History is temporary and clears when you refresh the page.
+          </p>
+        </section>
 
         <footer>
           <span>
