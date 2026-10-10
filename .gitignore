@@ -1,0 +1,46 @@
+@'
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Test and coverage files
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# IDE and editor files
+.vscode/
+.idea/
+
+# Operating system files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Logs and temporary files
+*.log
+tmp/
+temp/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# Local datasets and generated data
+data/*
+!data/.gitkeep
+
+# Trained model artifacts
+models/*
+!models/.gitkeep
+'@ | Set-Content -Encoding utf8 .gitignore
