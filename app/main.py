@@ -1,4 +1,4 @@
-
+import logging
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException
@@ -7,6 +7,10 @@ from pydantic import BaseModel, Field
 
 from app.risk_assessor import assess_url_risk
 from app.url_analyzer import extract_url_features
+from app.ml_predictor import is_model_loaded, predict_url
+
+
+logger = logging.getLogger(__name__)
 
 
 app = FastAPI(
@@ -58,9 +62,13 @@ class AssessmentResponse(BaseModel):
 
 
 class MLPredictionResponse(BaseModel):
-    status: Literal["not_available"]
-    message: str
-
+    status: Literal["available", "not_available"]
+    model: str | None = None
+    predicted_label: Literal[0, 1] | None = None
+    prediction: Literal["phishing", "legitimate"] | None = None
+    decision_score: float | None = None
+    score_note: str | None = None
+    message: str | None = None
 
 class URLAnalysisResponse(BaseModel):
     url: str
@@ -81,15 +89,18 @@ def home():
     }
 
 
+
 @app.get("/health")
 def health_check():
+    loaded = is_model_loaded()
+
     return {
         "status": "healthy",
-        "model_loaded": False,
+        "model_loaded": loaded,
         "components": {
             "url_analyzer": "ready",
             "heuristic_assessor": "ready",
-            "ml_model": "not_loaded",
+            "ml_model": "ready" if loaded else "not_loaded",
         },
     }
 
@@ -107,17 +118,30 @@ def analyze_url(request: URLAnalysisRequest):
             detail=str(error),
         ) from error
 
+    # Preserve the original transparent, rule-based assessment.
     assessment = assess_url_risk(features)
+
+    # Run the ML model separately. A model failure must not erase
+    # the existing rule-based assessment.
+    try:
+        ml_prediction = {
+            "status": "available",
+            **predict_url(request.url),
+        }
+    except Exception:
+        logger.exception("Machine-learning URL prediction failed")
+
+        ml_prediction = {
+            "status": "not_available",
+            "message": (
+                "ML prediction is unavailable. "
+                "The rule-based assessment is still available."
+            ),
+        }
 
     return {
         "url": request.url,
         "features": features,
         "assessment": assessment,
-        "ml_prediction": {
-            "status": "not_available",
-            "message": (
-                "The ML model has not been trained or connected yet. "
-                "Only URL features and heuristic findings are available."
-            ),
-        },
+        "ml_prediction": ml_prediction,
     }

@@ -41,6 +41,7 @@ data/*
 !data/.gitkeep
 
 # Trained model artifacts
+# Ignore model artifacts by default
 models/*
-!models/.gitkeep
-'@ | Set-Content -Encoding utf8 .gitignore
+!models/
+!models/metadata.json

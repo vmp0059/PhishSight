@@ -1,0 +1,36 @@
+{
+  "model_name": "PhishSight Character N-gram Model",
+  "status": "experimental_candidate",
+  "algorithm": "TfidfVectorizer character n-grams + LinearSVC",
+  "source_dataset": "flwrlabs/fed-phishing-urls",
+  "training_sample_size": 250000,
+  "actual_model_training_rows": 197240,
+  "feature_extraction": {
+    "analyzer": "char",
+    "ngram_range": [
+      3,
+      5
+    ],
+    "max_features": 200000,
+    "lowercase_before_prediction": true
+  },
+  "label_mapping": {
+    "0": "phishing",
+    "1": "legitimate"
+  },
+  "metrics": {
+    "validation_balanced_accuracy": 0.916,
+    "validation_roc_auc": 0.9734,
+    "heldout_balanced_accuracy": 0.9299,
+    "heldout_roc_auc": 0.9822,
+    "unseen_domain_balanced_accuracy": 0.8878,
+    "unseen_domain_roc_auc": 0.9591
+  },
+  "limitations": [
+    "The held-out dataset was used during project development.",
+    "Performance on real-world traffic may differ.",
+    "LinearSVC decision scores are not calibrated probabilities.",
+    "Predictions are indicators, not proof that a URL is malicious."
+  ],
+  "sklearn_version": "1.6.1"
+}
